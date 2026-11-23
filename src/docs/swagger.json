@@ -1,0 +1,394 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API de Treinos Esportivos — Controle de Carga e Risco de Lesão",
+    "version": "1.0.0",
+    "description": "API REST de um clube de futebol para registrar treinos, calcular a carga de cada sessão e sinalizar risco de sobrecarga semanal.\n\n**Fórmula:** Carga = (duracaoMin / 10) × intensidade × multiplicador\n\n**Multiplicadores:** F (Físico) = 1.5 · T (Técnico) = 1.2 · E (Estratégico) = 1.0\n\n**Risco:** sinalizado somente quando cargaSemanal > cargaMaximaSemanal (estritamente maior)."
+  },
+  "servers": [{ "url": "http://localhost:3000", "description": "Servidor local" }],
+  "tags": [
+    { "name": "Jogadores", "description": "Cadastro e gestão de atletas" },
+    { "name": "Configuração", "description": "Limite máximo de carga semanal" },
+    { "name": "Treinos", "description": "Sessões de treino e cálculo de carga" },
+    { "name": "Relatórios", "description": "Relatório semanal consolidado" }
+  ],
+  "paths": {
+    "/jogadores": {
+      "post": {
+        "tags": ["Jogadores"],
+        "summary": "Cadastrar atleta",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JogadorEntrada" },
+              "example": { "nome": "Thiago Veloz", "posicao": "A" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Jogador cadastrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaJogador" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      },
+      "get": {
+        "tags": ["Jogadores"],
+        "summary": "Listar atletas",
+        "parameters": [
+          { "name": "ativo", "in": "query", "required": false, "schema": { "type": "string", "enum": ["true", "false"] }, "description": "Filtra por status" }
+        ],
+        "responses": {
+          "200": { "description": "Lista de jogadores", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaListaJogadores" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/jogadores/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/IdJogador" }],
+      "get": {
+        "tags": ["Jogadores"],
+        "summary": "Consultar atleta por ID",
+        "responses": {
+          "200": { "description": "Jogador encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaJogador" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      },
+      "put": {
+        "tags": ["Jogadores"],
+        "summary": "Atualizar atleta",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/JogadorAtualizacao" },
+              "example": { "nome": "Carlos Muralha Jr.", "posicao": "G" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Jogador atualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaJogador" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/jogadores/{id}/desativar": {
+      "parameters": [{ "$ref": "#/components/parameters/IdJogador" }],
+      "patch": {
+        "tags": ["Jogadores"],
+        "summary": "Desativar atleta (ativo = false, histórico preservado)",
+        "responses": {
+          "200": { "description": "Jogador desativado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaJogador" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/configuracao": {
+      "get": {
+        "tags": ["Configuração"],
+        "summary": "Consultar limite máximo semanal vigente",
+        "responses": {
+          "200": { "description": "Configuração vigente", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaConfiguracao" } } } },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      },
+      "put": {
+        "tags": ["Configuração"],
+        "summary": "Cadastrar ou atualizar limite máximo semanal",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ConfiguracaoEntrada" },
+              "example": { "cargaMaximaSemanal": 250, "dataVigencia": "2026-10-01" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Configuração atualizada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaConfiguracao" } } } },
+          "201": { "description": "Configuração cadastrada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaConfiguracao" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/treinos": {
+      "post": {
+        "tags": ["Treinos"],
+        "summary": "Registrar sessão de treino (carga calculada automaticamente)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TreinoEntrada" },
+              "examples": {
+                "valido": { "summary": "Treino válido (carga esperada = 72)", "value": { "codigo": "TR-1001", "jogadorId": 4, "dataTreino": "2026-11-06", "tipo": "F", "duracaoMin": 60, "intensidade": 8 } },
+                "codigoDuplicado": { "summary": "Código duplicado (409)", "value": { "codigo": "TR-0001", "jogadorId": 4, "dataTreino": "2026-11-06", "tipo": "F", "duracaoMin": 60, "intensidade": 8 } },
+                "intensidadeInvalida": { "summary": "Intensidade fora de 1..10 (400)", "value": { "codigo": "TR-1002", "jogadorId": 4, "dataTreino": "2026-11-06", "tipo": "T", "duracaoMin": 60, "intensidade": 11 } },
+                "duracaoInvalida": { "summary": "Duração <= 0 (400)", "value": { "codigo": "TR-1003", "jogadorId": 4, "dataTreino": "2026-11-06", "tipo": "E", "duracaoMin": 0, "intensidade": 5 } },
+                "jogadorInativo": { "summary": "Jogador inativo (400)", "value": { "codigo": "TR-1004", "jogadorId": 7, "dataTreino": "2026-11-06", "tipo": "T", "duracaoMin": 60, "intensidade": 5 } },
+                "jogadorInexistente": { "summary": "Jogador inexistente (404)", "value": { "codigo": "TR-1005", "jogadorId": 999, "dataTreino": "2026-11-06", "tipo": "T", "duracaoMin": 60, "intensidade": 5 } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Treino registrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaTreinoCriado" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "409": { "$ref": "#/components/responses/Erro409" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      },
+      "get": {
+        "tags": ["Treinos"],
+        "summary": "Listar sessões com filtros",
+        "parameters": [
+          { "name": "jogadorId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "tipo", "in": "query", "schema": { "type": "string", "enum": ["F", "T", "E"] } },
+          { "name": "dataInicio", "in": "query", "schema": { "type": "string", "format": "date" }, "example": "2026-11-02" },
+          { "name": "dataFim", "in": "query", "schema": { "type": "string", "format": "date" }, "example": "2026-11-08" }
+        ],
+        "responses": {
+          "200": { "description": "Lista de treinos", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaListaTreinos" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/treinos/jogador/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/IdJogador" }],
+      "get": {
+        "tags": ["Treinos"],
+        "summary": "Listar treinos de um atleta",
+        "responses": {
+          "200": { "description": "Treinos do atleta", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaListaTreinos" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/treinos/{codigo}": {
+      "delete": {
+        "tags": ["Treinos"],
+        "summary": "Excluir sessão pelo código",
+        "parameters": [
+          { "name": "codigo", "in": "path", "required": true, "schema": { "type": "string" }, "example": "TR-1001" }
+        ],
+        "responses": {
+          "200": { "description": "Treino excluído", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaTreino" } } } },
+          "404": { "$ref": "#/components/responses/Erro404" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    },
+    "/relatorios/semanal": {
+      "get": {
+        "tags": ["Relatórios"],
+        "summary": "Relatório consolidado da semana (segunda a domingo)",
+        "parameters": [
+          { "name": "data", "in": "query", "required": true, "schema": { "type": "string", "format": "date" }, "example": "2026-11-05", "description": "Qualquer data da semana desejada" }
+        ],
+        "responses": {
+          "200": { "description": "Relatório semanal", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespostaRelatorio" } } } },
+          "400": { "$ref": "#/components/responses/Erro400" },
+          "500": { "$ref": "#/components/responses/Erro500" }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "IdJogador": { "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 }, "example": 1 }
+    },
+    "schemas": {
+      "Jogador": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 1 },
+          "nome": { "type": "string", "example": "Carlos Muralha" },
+          "posicao": { "type": "string", "enum": ["G", "Z", "M", "A"], "example": "G" },
+          "ativo": { "type": "boolean", "example": true },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "JogadorEntrada": {
+        "type": "object",
+        "required": ["nome", "posicao"],
+        "properties": {
+          "nome": { "type": "string" },
+          "posicao": { "type": "string", "enum": ["G", "Z", "M", "A"] },
+          "ativo": { "type": "boolean", "default": true }
+        }
+      },
+      "JogadorAtualizacao": {
+        "type": "object",
+        "properties": {
+          "nome": { "type": "string" },
+          "posicao": { "type": "string", "enum": ["G", "Z", "M", "A"] },
+          "ativo": { "type": "boolean" }
+        }
+      },
+      "Configuracao": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 1 },
+          "cargaMaximaSemanal": { "type": "number", "example": 250 },
+          "dataVigencia": { "type": "string", "format": "date", "nullable": true, "example": "2026-10-01" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ConfiguracaoEntrada": {
+        "type": "object",
+        "required": ["cargaMaximaSemanal"],
+        "properties": {
+          "cargaMaximaSemanal": { "type": "number", "minimum": 0.01 },
+          "dataVigencia": { "type": "string", "format": "date", "nullable": true }
+        }
+      },
+      "Treino": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 25 },
+          "codigo": { "type": "string", "example": "TR-1001" },
+          "jogadorId": { "type": "integer", "example": 4 },
+          "dataTreino": { "type": "string", "format": "date", "example": "2026-11-06" },
+          "tipo": { "type": "string", "enum": ["F", "T", "E"], "example": "F" },
+          "duracaoMin": { "type": "integer", "example": 60 },
+          "intensidade": { "type": "integer", "minimum": 1, "maximum": 10, "example": 8 },
+          "carga": { "type": "number", "example": 72 },
+          "Jogador": { "$ref": "#/components/schemas/Jogador" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "TreinoEntrada": {
+        "type": "object",
+        "required": ["codigo", "jogadorId", "dataTreino", "tipo", "duracaoMin", "intensidade"],
+        "properties": {
+          "codigo": { "type": "string" },
+          "jogadorId": { "type": "integer" },
+          "dataTreino": { "type": "string", "format": "date" },
+          "tipo": { "type": "string", "enum": ["F", "T", "E"] },
+          "duracaoMin": { "type": "integer", "minimum": 1 },
+          "intensidade": { "type": "integer", "minimum": 1, "maximum": 10 }
+        }
+      },
+      "JogadorRanking": {
+        "type": "object",
+        "properties": {
+          "nome": { "type": "string" },
+          "posicao": { "type": "string" },
+          "cargaSemanal": { "type": "number" },
+          "quantidadeTreinos": { "type": "integer" }
+        }
+      },
+      "Extremo": {
+        "type": "object",
+        "properties": {
+          "empate": { "type": "boolean" },
+          "observacao": { "type": "string" },
+          "cargaSemanal": { "type": "number" },
+          "jogadores": { "type": "array", "items": { "$ref": "#/components/schemas/JogadorRanking" } }
+        }
+      },
+      "Relatorio": {
+        "type": "object",
+        "properties": {
+          "semana": {
+            "type": "object",
+            "properties": {
+              "dataReferencia": { "type": "string", "example": "2026-11-05" },
+              "inicio": { "type": "string", "example": "2026-11-02T00:00:00" },
+              "fim": { "type": "string", "example": "2026-11-08T23:59:59" }
+            }
+          },
+          "criterio": { "type": "string" },
+          "limiteCargaSemanal": { "type": "number", "nullable": true, "example": 250 },
+          "semanaVazia": { "type": "boolean" },
+          "totalTreinos": { "type": "integer", "example": 12 },
+          "cargaTotalSemana": { "type": "number" },
+          "desempenhoPorJogador": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "jogadorId": { "type": "integer" },
+                "nome": { "type": "string" },
+                "posicao": { "type": "string" },
+                "ativo": { "type": "boolean" },
+                "cargaSemanal": { "type": "number" },
+                "quantidadeTreinos": { "type": "integer" },
+                "emRisco": { "type": "boolean" },
+                "status": { "type": "string", "enum": ["RISCO DE SOBRECARGA", "NORMAL"] }
+              }
+            }
+          },
+          "maiorCargaSemanal": { "$ref": "#/components/schemas/Extremo" },
+          "menorCargaSemanal": { "$ref": "#/components/schemas/Extremo" },
+          "jogadoresEmRisco": {
+            "type": "object",
+            "properties": {
+              "quantidade": { "type": "integer" },
+              "jogadores": { "type": "array", "items": { "$ref": "#/components/schemas/JogadorRanking" } }
+            }
+          },
+          "mediaCargaPorTipo": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "descricao": { "type": "string" },
+                "quantidadeSessoes": { "type": "integer" },
+                "cargaMedia": { "type": "number" }
+              }
+            }
+          },
+          "resumoPorPosicao": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "descricao": { "type": "string" },
+                "totalTreinos": { "type": "integer" },
+                "cargaMediaPorSessao": { "type": "number" }
+              }
+            }
+          }
+        }
+      },
+      "RespostaJogador": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "mensagem": { "type": "string" }, "dados": { "$ref": "#/components/schemas/Jogador" } } },
+      "RespostaListaJogadores": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "dados": { "type": "array", "items": { "$ref": "#/components/schemas/Jogador" } } } },
+      "RespostaConfiguracao": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "mensagem": { "type": "string" }, "dados": { "$ref": "#/components/schemas/Configuracao" } } },
+      "RespostaTreino": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "mensagem": { "type": "string" }, "dados": { "$ref": "#/components/schemas/Treino" } } },
+      "RespostaTreinoCriado": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "mensagem": { "type": "string" }, "calculo": { "type": "string", "example": "(60 / 10) x 8 x 1.5 = 72" }, "dados": { "$ref": "#/components/schemas/Treino" } } },
+      "RespostaListaTreinos": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "dados": { "type": "array", "items": { "$ref": "#/components/schemas/Treino" } } } },
+      "RespostaRelatorio": { "type": "object", "properties": { "sucesso": { "type": "boolean" }, "dados": { "$ref": "#/components/schemas/Relatorio" } } },
+      "Erro": {
+        "type": "object",
+        "properties": {
+          "sucesso": { "type": "boolean", "example": false },
+          "erro": { "type": "string" },
+          "detalhes": { "type": "array", "items": { "type": "object", "properties": { "campo": { "type": "string" }, "mensagem": { "type": "string" } } } }
+        }
+      }
+    },
+    "responses": {
+      "Erro400": { "description": "Requisição inválida", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" } } } },
+      "Erro404": { "description": "Recurso não encontrado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" } } } },
+      "Erro409": { "description": "Conflito (registro duplicado)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" } } } },
+      "Erro500": { "description": "Erro interno do servidor", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Erro" } } } }
+    }
+  }
+}
